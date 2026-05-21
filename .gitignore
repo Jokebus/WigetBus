@@ -1,0 +1,17 @@
+# Visual Studio local state
+.vs/
+.vscode/
+*.user
+*.suo
+
+# Build output
+bin/
+obj/
+
+# NuGet packages restored from packages.config
+packages/
+
+# Logs and temporary files
+*.log
+*.tmp
+*.cache
