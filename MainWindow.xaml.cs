@@ -19,6 +19,7 @@ namespace WigetBus
         private AlarmEntry _editingAlarm = null;
         private DispatcherTimer _clockTimer;
         private DispatcherTimer _alarmTimer;
+        private DispatcherTimer _startupCollapseTimer;
 
         private SavedData _data;
 
@@ -45,8 +46,9 @@ namespace WigetBus
 
         // základní velikosti okna (bez zoomu)
         private const double BaseWidth = 280;
-        private const double BaseCollapsedHeight = 150;
-        private const double BaseExpandedHeight = 640;
+        private const double BaseExpandedWidth = 570;
+        private const double BaseCollapsedHeight = 118;
+        private const double BaseExpandedHeight = 448;
 
         // rozbaleno / sbaleno
         private bool _detailsVisible = false;
@@ -67,10 +69,11 @@ namespace WigetBus
             InitializeComponent();
             this.DataContext = this;
 
-            // výchozí stav: sbaleno
-            DetailsPanel.Visibility = Visibility.Collapsed;
-            _detailsVisible = false;
-            ToggleArrowText.Text = "▼";
+            // výchozí start: krátce rozbaleno, aby se kalendář správně vykreslil a obarvil
+            DetailsPanel.Visibility = Visibility.Visible;
+            SidePanel.Visibility = Visibility.Visible;
+            _detailsVisible = true;
+            ToggleArrowText.Text = "▲";
 
             LoadHolidaysFromCsv();
             LoadData();
@@ -88,6 +91,7 @@ namespace WigetBus
             _alarmTimer.Start();
 
             ApplyScale();
+            StartStartupExpandedPreview();
         }
 
         public event System.ComponentModel.PropertyChangedEventHandler PropertyChanged;
@@ -214,20 +218,48 @@ namespace WigetBus
         // přepínání rozbaleno / sbaleno (klik na šipku)
         private void ToggleDetailsText_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
         {
+            if (_startupCollapseTimer != null)
+                _startupCollapseTimer.Stop();
+
             _detailsVisible = !_detailsVisible;
 
             if (_detailsVisible)
             {
                 DetailsPanel.Visibility = Visibility.Visible;
+                SidePanel.Visibility = Visibility.Visible;
                 ToggleArrowText.Text = "▲";
+                StartCalendarThemeRetry();
             }
             else
             {
                 DetailsPanel.Visibility = Visibility.Collapsed;
+                SidePanel.Visibility = Visibility.Collapsed;
                 ToggleArrowText.Text = "▼";
             }
 
             ApplyScale(); // přepočítat velikost okna
+        }
+
+        private void StartStartupExpandedPreview()
+        {
+            _startupCollapseTimer = new DispatcherTimer();
+            _startupCollapseTimer.Interval = TimeSpan.FromSeconds(3);
+            _startupCollapseTimer.Tick += (s, e) =>
+            {
+                _startupCollapseTimer.Stop();
+
+                if (!_detailsVisible)
+                    return;
+
+                _detailsVisible = false;
+                DetailsPanel.Visibility = Visibility.Collapsed;
+                SidePanel.Visibility = Visibility.Collapsed;
+                ToggleArrowText.Text = "▼";
+                ApplyScale();
+            };
+
+            StartCalendarThemeRetry();
+            _startupCollapseTimer.Start();
         }
 
         // změna vybraného dne v kalendáři
@@ -515,7 +547,7 @@ namespace WigetBus
             RootScaleTransform.ScaleX = _currentScale;
             RootScaleTransform.ScaleY = _currentScale;
 
-            this.Width = BaseWidth * _currentScale;
+            this.Width = (_detailsVisible ? BaseExpandedWidth : BaseWidth) * _currentScale;
             if (_detailsVisible)
                 this.Height = BaseExpandedHeight * _currentScale;
             else
@@ -711,6 +743,7 @@ namespace WigetBus
                 return false;
 
             bool any = false;
+            bool anyTextStyled = false;
             foreach (var dayButton in FindVisualChildren<CalendarDayButton>(CalendarControl))
             {
                 any = true;
@@ -724,58 +757,174 @@ namespace WigetBus
                 DateTime date = (DateTime)ctx;
 
                 // základní pozadí: absolutní černá
-                dayButton.Background = Brushes.Black; // Barvy textu kalendáře
+                dayButton.Background = Brushes.Black;
                 dayButton.BorderBrush = Brushes.Transparent;
 
                 // dny z jiného měsíce ztlumíme
                 if (date.Month != CalendarControl.DisplayDate.Month)
                 {
-                    // non-month days: white (visible)
-                    var brush = Brushes.White;
+                    var brush = new SolidColorBrush(Color.FromRgb(120, 120, 120));
+                    dayButton.Foreground = brush;
                     foreach (var tb in FindVisualChildren<TextBlock>(dayButton))
+                    {
                         tb.Foreground = brush;
+                        anyTextStyled = true;
+                    }
                     continue;
                 }
 
+                bool isSaturday = date.DayOfWeek == DayOfWeek.Saturday;
                 bool isSunday = date.DayOfWeek == DayOfWeek.Sunday;
                 string key = date.ToString("MM-dd");
                 bool isHoliday = _holidays.ContainsKey(key);
 
-                if (isHoliday)
+                if (date.Date == DateTime.Today)
+                {
+                    var brush = Brushes.LawnGreen;
+                    dayButton.Foreground = brush;
+                    foreach (var tb in FindVisualChildren<TextBlock>(dayButton))
+                    {
+                        tb.Foreground = brush;
+                        anyTextStyled = true;
+                    }
+                }
+                else if (isHoliday)
                 {
                     var brush = Brushes.Red;
+                    dayButton.Foreground = brush;
                     foreach (var tb in FindVisualChildren<TextBlock>(dayButton))
+                    {
                         tb.Foreground = brush;
+                        anyTextStyled = true;
+                    }
                 }
-                else if (isSunday)
+                else if (isSaturday || isSunday)
                 {
-                    var brush = Brushes.Orange;
+                    var brush = new SolidColorBrush(Color.FromRgb(255, 186, 96));
+                    dayButton.Foreground = brush;
                     foreach (var tb in FindVisualChildren<TextBlock>(dayButton))
+                    {
                         tb.Foreground = brush;
+                        anyTextStyled = true;
+                    }
                 }
                 else
                 {
-                    var brush = Brushes.Yellow;
+                    var brush = Brushes.White;
+                    dayButton.Foreground = brush;
                     foreach (var tb in FindVisualChildren<TextBlock>(dayButton))
+                    {
                         tb.Foreground = brush;
+                        anyTextStyled = true;
+                    }
                 }
             }
 
-            return any;
+            RemoveCalendarChrome();
+            StyleCalendarHeader();
+
+            return any && anyTextStyled;
+        }
+
+        private void RemoveCalendarChrome()
+        {
+            foreach (var border in FindVisualChildren<Border>(CalendarControl))
+            {
+                border.BorderBrush = Brushes.Transparent;
+                border.BorderThickness = new Thickness(0);
+            }
+
+            foreach (var control in FindVisualChildren<Control>(CalendarControl))
+            {
+                control.FocusVisualStyle = null;
+            }
+        }
+
+        private void StyleCalendarHeader()
+        {
+            var headerBrush = new SolidColorBrush(Color.FromRgb(153, 204, 255));
+            var arrowBrush = new SolidColorBrush(Color.FromRgb(216, 180, 255));
+
+            foreach (var button in FindVisualChildren<Button>(CalendarControl))
+            {
+                if (button is CalendarDayButton)
+                    continue;
+
+                button.Foreground = headerBrush;
+                button.Background = Brushes.Transparent;
+                button.BorderBrush = Brushes.Transparent;
+                button.BorderThickness = new Thickness(0);
+                button.FontSize = 13;
+                button.FontWeight = FontWeights.SemiBold;
+                button.Opacity = 0.9;
+
+                foreach (var text in FindVisualChildren<TextBlock>(button))
+                {
+                    text.Foreground = headerBrush;
+                    text.FontSize = 13;
+                    text.FontWeight = FontWeights.SemiBold;
+                }
+
+                bool isArrowButton = false;
+                foreach (var path in FindVisualChildren<System.Windows.Shapes.Path>(button))
+                {
+                    isArrowButton = true;
+                    path.Fill = arrowBrush;
+                    path.Stroke = arrowBrush;
+                    path.Opacity = 0.95;
+                }
+
+                if (isArrowButton)
+                {
+                    button.Width = 24;
+                    button.Height = 22;
+
+                    if (button.Name.IndexOf("Previous", StringComparison.OrdinalIgnoreCase) >= 0)
+                        button.RenderTransform = new TranslateTransform(18, 0);
+                    else if (button.Name.IndexOf("Next", StringComparison.OrdinalIgnoreCase) >= 0)
+                        button.RenderTransform = new TranslateTransform(-18, 0);
+                }
+            }
+
+            StyleCalendarWeekdayHeaders();
+        }
+
+        private void StyleCalendarWeekdayHeaders()
+        {
+            var weekdayBrush = new SolidColorBrush(Color.FromRgb(118, 132, 146));
+            var weekdayNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                "po", "út", "st", "čt", "pá", "so", "ne"
+            };
+
+            foreach (var text in FindVisualChildren<TextBlock>(CalendarControl))
+            {
+                var value = (text.Text ?? string.Empty).Trim();
+                if (!weekdayNames.Contains(value))
+                    continue;
+
+                text.Foreground = weekdayBrush;
+                text.FontWeight = FontWeights.SemiBold;
+                text.Opacity = 1.0;
+            }
         }
 
         private void StartCalendarThemeRetry()
         {
-            // Use CompositionTarget.Rendering to retry during render loop until day buttons exist.
             int attempts = 0;
-            const int maxAttempts = 60; // ~1s at 60fps
+            int successfulAttempts = 0;
+            const int maxAttempts = 120; // ~2s at 60fps
+            const int requiredSuccessfulAttempts = 8;
             EventHandler handler = null;
             handler = (s, e) =>
             {
                 attempts++;
                 try
                 {
-                    if (ApplyCalendarTheme() || attempts >= maxAttempts)
+                    if (ApplyCalendarTheme())
+                        successfulAttempts++;
+
+                    if (successfulAttempts >= requiredSuccessfulAttempts || attempts >= maxAttempts)
                     {
                         CompositionTarget.Rendering -= handler;
                     }
