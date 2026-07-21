@@ -3,10 +3,12 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Media;
+using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Input;
+using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Threading;
 using Newtonsoft.Json;
@@ -15,6 +17,10 @@ namespace WigetBus
 {
     public partial class MainWindow : Window, System.ComponentModel.INotifyPropertyChanged
     {
+        private const int GwlExStyle = -20;
+        private const int WsExToolWindow = 0x00000080;
+        private const int WsExAppWindow = 0x00040000;
+
         // currently editing alarm (null when adding new)
         private AlarmEntry _editingAlarm = null;
         private DispatcherTimer _clockTimer;
@@ -91,6 +97,7 @@ namespace WigetBus
             _alarmTimer.Start();
 
             ApplyScale();
+            RestoreWindowPosition();
             StartStartupExpandedPreview();
         }
 
@@ -144,11 +151,24 @@ namespace WigetBus
             RefreshNotesList();
         }
 
+        private void Window_SourceInitialized(object sender, EventArgs e)
+        {
+            HideFromAltTab();
+        }
+
+        private void Window_Closing(object sender, System.ComponentModel.CancelEventArgs e)
+        {
+            SaveWindowPosition();
+        }
+
         // posouvání okna za horní část (čas/datum)
         private void TitleBar_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
         {
             if (e.ButtonState == MouseButtonState.Pressed)
+            {
                 DragMove();
+                SaveWindowPosition();
+            }
         }
 
         private void ClockTimer_Tick(object sender, EventArgs e)
@@ -593,6 +613,55 @@ namespace WigetBus
             ApplyScale();
         }
 
+        // ====== CHOVÁNÍ DESKTOP WIDGETU ======
+
+        private void HideFromAltTab()
+        {
+            var helper = new WindowInteropHelper(this);
+            var hwnd = helper.Handle;
+            if (hwnd == IntPtr.Zero)
+                return;
+
+            var exStyle = GetWindowLong(hwnd, GwlExStyle);
+            exStyle = (exStyle | WsExToolWindow) & ~WsExAppWindow;
+            SetWindowLong(hwnd, GwlExStyle, exStyle);
+        }
+
+        private void RestoreWindowPosition()
+        {
+            if (_data == null || !_data.WindowLeft.HasValue || !_data.WindowTop.HasValue)
+                return;
+
+            var left = _data.WindowLeft.Value;
+            var top = _data.WindowTop.Value;
+
+            if (double.IsNaN(left) || double.IsInfinity(left) ||
+                double.IsNaN(top) || double.IsInfinity(top))
+                return;
+
+            var minLeft = SystemParameters.VirtualScreenLeft;
+            var minTop = SystemParameters.VirtualScreenTop;
+            var maxLeft = minLeft + SystemParameters.VirtualScreenWidth - Math.Max(80, Width);
+            var maxTop = minTop + SystemParameters.VirtualScreenHeight - Math.Max(60, Height);
+
+            Left = Math.Min(Math.Max(left, minLeft), maxLeft);
+            Top = Math.Min(Math.Max(top, minTop), maxTop);
+        }
+
+        private void SaveWindowPosition()
+        {
+            if (_data == null)
+                return;
+
+            if (double.IsNaN(Left) || double.IsInfinity(Left) ||
+                double.IsNaN(Top) || double.IsInfinity(Top))
+                return;
+
+            _data.WindowLeft = Left;
+            _data.WindowTop = Top;
+            SaveData();
+        }
+
         // ====== PERSISTENCE POZNÁMEK A BUDÍKŮ ======
 
         private void LoadData()
@@ -955,6 +1024,12 @@ namespace WigetBus
                     yield return childOfChild;
             }
         }
+
+        [DllImport("user32.dll")]
+        private static extern int GetWindowLong(IntPtr hWnd, int nIndex);
+
+        [DllImport("user32.dll")]
+        private static extern int SetWindowLong(IntPtr hWnd, int nIndex, int dwNewLong);
     }
 
     // ====== DATOVÉ TŘÍDY ======
@@ -963,6 +1038,8 @@ namespace WigetBus
     {
         public Dictionary<string, string> NotesByDate { get; set; }
         public List<AlarmEntry> Alarms { get; set; }
+        public double? WindowLeft { get; set; }
+        public double? WindowTop { get; set; }
 
         public SavedData()
         {

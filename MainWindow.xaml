@@ -6,8 +6,11 @@
         WindowStyle="None"
         ResizeMode="NoResize"
         Topmost="True"
+        ShowInTaskbar="False"
         AllowsTransparency="True"
         Background="Transparent"
+        SourceInitialized="Window_SourceInitialized"
+        Closing="Window_Closing"
         Loaded="Window_Loaded">
 
         <Border CornerRadius="12"
